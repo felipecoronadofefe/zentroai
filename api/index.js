@@ -1,4 +1,4 @@
-// api/index.js — Webhook simples da ZENTRO AI com Z-API
+// api/index.js — Webhook simples da ZENTRO AI com logs detalhados
 
 export default async function handler(req, res) {
   // Teste rápido pelo navegador
@@ -9,7 +9,6 @@ export default async function handler(req, res) {
     });
   }
 
-  // Aceita só POST
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Use método POST" });
   }
@@ -18,40 +17,42 @@ export default async function handler(req, res) {
     console.log("Webhook recebido:", req.body);
     const body = req.body || {};
 
-    // ------------------ PEGAR TEXTO ------------------
-    // Formato que vimos nos logs: text_: { message: 'Oi' }
+    // ---------- TEXTO ----------
     const message =
-      body?.text_?.message ||
+      body?.text_?.message ||       // formato que vimos no log
       body?.message?.body ||
       body?.body ||
       "";
 
-    // ------------------ PEGAR TELEFONE ------------------
+    // ---------- TELEFONE ----------
     let phone = body?.phone || null;
 
-    // Se não vier phone mas vier chatId tipo "5543...@s.whatsapp.net"
     if (!phone && typeof body?.chatId === "string" && body.chatId.includes("@")) {
       phone = body.chatId.split("@")[0];
     }
 
-    console.log("Texto detectado:", message);
-    console.log("Telefone detectado:", phone);
+    console.log("Texto detectado:", message || "<vazio>");
+    console.log("Telefone detectado:", phone || "<nenhum>");
 
-    // Se realmente não tiver texto, só registra e sai
     if (!message) {
-      console.log("Nenhuma mensagem de texto encontrada no webhook (sem text_ nem body).");
+      // só loga e sai, sem essa frase confusa
       return res.status(200).json({ ok: true, info: "sem texto" });
     }
 
-    // ------------------ RESPOSTA SIMPLES (sem IA por enquanto) ------------------
+    // ---------- RESPOSTA SIMPLES ----------
     const resposta = `Oi! Aqui é a ZENTRO AI 👋\nRecebi sua mensagem: "${message}"`;
 
-    // ------------------ ENVIAR PELA Z-API ------------------
+    // ---------- ENVIO PELA Z-API ----------
     const INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
     const TOKEN = process.env.ZAPI_TOKEN;
 
-    if (phone && INSTANCE_ID && TOKEN) {
+    if (!INSTANCE_ID || !TOKEN) {
+      console.error("ZAPI_INSTANCE_ID ou ZAPI_TOKEN não configurados.");
+    } else if (!phone) {
+      console.error("Telefone não encontrado para envio.");
+    } else {
       const url = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`;
+      console.log("Enviando para Z-API:", url, "phone:", phone);
 
       try {
         const zapResponse = await fetch(url, {
@@ -65,13 +66,12 @@ export default async function handler(req, res) {
           }),
         });
 
-        const zapData = await zapResponse.json();
-        console.log("Resposta da Z-API:", zapData);
+        const text = await zapResponse.text();
+        console.log("Status HTTP da Z-API:", zapResponse.status);
+        console.log("Resposta da Z-API (texto bruto):", text);
       } catch (err) {
-        console.error("Erro ao enviar mensagem pela Z-API:", err);
+        console.error("Erro ao chamar Z-API:", err);
       }
-    } else {
-      console.error("Sem phone ou sem ZAPI_INSTANCE_ID/ZAPI_TOKEN configurados.");
     }
 
     return res.status(200).json({ ok: true });
