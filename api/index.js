@@ -23,23 +23,53 @@ export default async function handler(req, res) {
     console.log("Webhook recebido:", req.body);
 
     // ---------------------------
-    // PEGAR TEXTO E TELEFONE (várias formas da Z-API)
+    // TENTAR PEGAR A PRIMEIRA MENSAGEM EM waitingMessages (formato da Z-API)
     // ---------------------------
-    const message =
-      req.body?.message?.body || // alguns formatos antigos
-      req.body?.body || // outro fallback
-      req.body?.lastMessage || // formato novo da Z-API
-      req.body?.content || // algumas instâncias usam "content"
-      req.body?.message || // caso venha do site
+    let wm0 = null;
+    if (Array.isArray(req.body?.waitingMessages) && req.body.waitingMessages.length > 0) {
+      wm0 = req.body.waitingMessages[0]; // primeira mensagem da fila
+    }
+
+    // Se wm0 tiver um campo "message" dentro, usa ele
+    const innerMsg = wm0?.message || wm0 || null;
+
+    // ---------------------------
+    // PEGAR TEXTO DA MENSAGEM
+    // ---------------------------
+    let message =
+      req.body?.message?.body ||   // alguns formatos antigos
+      req.body?.body ||            // outro fallback
+      req.body?.lastMessage ||     // formato novo da Z-API
+      req.body?.content ||         // variação
+      req.body?.message ||         // caso venha do site
+      innerMsg?.body ||            // body direto em waitingMessages[0]
+      innerMsg?.text ||            // ou text
+      innerMsg?.content ||         // ou content
       "";
 
-    const phone =
-      req.body?.message?.phone || // formato antigo
-      req.body?.phone || // outro fallback
-      req.body?.contactPhone || // formato novo da Z-API
+    // ---------------------------
+    // PEGAR TELEFONE
+    // ---------------------------
+    let phone =
+      req.body?.message?.phone ||   // formato antigo
+      req.body?.phone ||            // outro fallback
+      req.body?.contactPhone ||     // formato novo da Z-API
+      innerMsg?.phone ||            // telefone dentro de waitingMessages[0]
       null;
 
-    // Se não tiver mensagem, só confirma o recebimento
+    // Se ainda não tiver phone mas tiver chatId, tenta extrair
+    if (!phone) {
+      const chatId =
+        req.body?.chatId ||
+        wm0?.chatId ||
+        innerMsg?.chatId ||
+        null;
+
+      if (chatId && typeof chatId === "string" && chatId.includes("@")) {
+        phone = chatId.split("@")[0]; // pega só o número antes do @
+      }
+    }
+
     if (!message) {
       console.log("Nenhuma mensagem de texto encontrada no webhook.");
       return res.status(200).json({ received: true, info: "Sem mensagem de texto." });
@@ -138,6 +168,7 @@ Não fale que é uma IA da OpenAI; diga apenas que é a assistente ZENTRO AI.
       reply: resposta,
       via: "site",
     });
+
   } catch (err) {
     console.error("Erro geral no handler:", err);
     return res.status(500).json({ error: "Erro interno no Webhook da ZENTRO AI." });
