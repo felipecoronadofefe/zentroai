@@ -1,7 +1,7 @@
-// api/index.js — Webhook da ZENTRO AI (Z-API Multi-Device)
+// api/index.js — Webhook simples da ZENTRO AI com Z-API
 
 export default async function handler(req, res) {
-  // ------------------ TESTE NO NAVEGADOR ------------------
+  // Teste rápido pelo navegador
   if (req.method === "GET") {
     return res.status(200).json({
       status: "online",
@@ -9,7 +9,7 @@ export default async function handler(req, res) {
     });
   }
 
-  // Aceita só POST para webhook
+  // Aceita só POST
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Use método POST" });
   }
@@ -19,22 +19,17 @@ export default async function handler(req, res) {
     const body = req.body || {};
 
     // ------------------ PEGAR TEXTO ------------------
-    let message =
-      body?.text_?.message ||   // formato que vimos nos logs: text_: { message: 'Oi' }
+    // Formato que vimos nos logs: text_: { message: 'Oi' }
+    const message =
+      body?.text_?.message ||
       body?.message?.body ||
       body?.body ||
-      body?.lastMessage ||
-      body?.content ||
       "";
 
     // ------------------ PEGAR TELEFONE ------------------
-    let phone =
-      body?.phone ||
-      body?.contactPhone ||
-      body?.message?.phone ||
-      null;
+    let phone = body?.phone || null;
 
-    // se não vier phone mas vier chatId tipo "5543...@s.whatsapp.net"
+    // Se não vier phone mas vier chatId tipo "5543...@s.whatsapp.net"
     if (!phone && typeof body?.chatId === "string" && body.chatId.includes("@")) {
       phone = body.chatId.split("@")[0];
     }
@@ -42,51 +37,16 @@ export default async function handler(req, res) {
     console.log("Texto detectado:", message);
     console.log("Telefone detectado:", phone);
 
+    // Se realmente não tiver texto, só registra e sai
     if (!message) {
-      console.log("Nenhuma mensagem de texto encontrada no webhook.");
+      console.log("Nenhuma mensagem de texto encontrada no webhook (sem text_ nem body).");
       return res.status(200).json({ ok: true, info: "sem texto" });
     }
 
-    // ------------------ GERAR RESPOSTA COM A IA ------------------
-    const apiKey = process.env.OPENAI_API_KEY;
-    let resposta = "";
+    // ------------------ RESPOSTA SIMPLES (sem IA por enquanto) ------------------
+    const resposta = `Oi! Aqui é a ZENTRO AI 👋\nRecebi sua mensagem: "${message}"`;
 
-    const systemPrompt = `
-Você é a ZENTRO AI, assistente virtual do Felipe Coronado.
-Responda de forma simpática, clara e objetiva.
-Ajude com dúvidas sobre o Felipe, o canal, produtos e projetos.
-Nunca diga que é uma IA da OpenAI; diga apenas que é a ZENTRO AI.
-    `;
-
-    if (apiKey) {
-      const openaiResponse = await fetch(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-3.5-turbo",
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: message },
-            ],
-          }),
-        }
-      );
-
-      const data = await openaiResponse.json();
-      resposta =
-        data?.choices?.[0]?.message?.content?.trim() ||
-        "Olá! Aqui é a ZENTRO AI 😊";
-    } else {
-      resposta =
-        "Olá! Aqui é a ZENTRO AI 👋\nAinda não estou 100% ativada, mas já estou recebendo suas mensagens.";
-    }
-
-    // ------------------ ENVIAR RESPOSTA PELO WHATSAPP (Z-API) ------------------
+    // ------------------ ENVIAR PELA Z-API ------------------
     const INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
     const TOKEN = process.env.ZAPI_TOKEN;
 
@@ -98,7 +58,6 @@ Nunca diga que é uma IA da OpenAI; diga apenas que é a ZENTRO AI.
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            // na versão Multi-Device NÃO precisa de client-token no header
           },
           body: JSON.stringify({
             phone,
