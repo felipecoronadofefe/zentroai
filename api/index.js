@@ -1,110 +1,145 @@
-// api/index.js — Nova versão compatível com ZENTRO AI + WhatsApp (Z-API)
+// api/index.js — Webhook da ZENTRO AI integrado com Z-API (WhatsApp)
 
 export default async function handler(req, res) {
   // ---------------------------
-  // TESTE RÁPIDO VIA GET (navegador)
+  // TESTE RÁPIDO (GET pelo navegador)
   // ---------------------------
   if (req.method === "GET") {
-    return res.status(200).json({ status: "online", message: "ZENTRO AI Webhook OK" });
+    return res
+      .status(200)
+      .json({ status: "online", message: "ZENTRO AI Webhook OK" });
   }
 
   // ---------------------------
-  // PROCESSAMENTO DE MENSAGEM (POST)
+  // TRATAR APENAS POST PARA WEBHOOK
   // ---------------------------
-  if (req.method === "POST") {
-    try {
-      console.log("Webhook recebido:", req.body);
+  if (req.method !== "POST") {
+    return res
+      .status(405)
+      .json({ error: "Método não permitido. Use requisição POST." });
+  }
 
-      // ---------------------------
-      // PEGAR TEXTO + TELEFONE (tanto da Z-API quanto do site)
-      // ---------------------------
-      const message =
-        req.body?.message?.body || // WhatsApp (Z-API)
-        req.body?.body ||          // Outro formato da Z-API
-        req.body?.message ||       // Caso venha do site
-        "";
+  try {
+    console.log("Webhook recebido:", req.body);
 
-      const phone =
-        req.body?.message?.phone || // WhatsApp
-        req.body?.phone ||           // Outro formato
-        null;
+    // ---------------------------
+    // PEGAR TEXTO E TELEFONE (várias formas da Z-API)
+    // ---------------------------
+    const message =
+      req.body?.message?.body || // alguns formatos antigos
+      req.body?.body || // outro fallback
+      req.body?.lastMessage || // formato novo da Z-API
+      req.body?.content || // algumas instâncias usam "content"
+      req.body?.message || // caso venha do site
+      "";
 
-      if (!message) {
-        return res.status(200).json({ info: "Sem mensagem recebida." });
+    const phone =
+      req.body?.message?.phone || // formato antigo
+      req.body?.phone || // outro fallback
+      req.body?.contactPhone || // formato novo da Z-API
+      null;
+
+    // Se não tiver mensagem, só confirma o recebimento
+    if (!message) {
+      console.log("Nenhuma mensagem de texto encontrada no webhook.");
+      return res.status(200).json({ received: true, info: "Sem mensagem de texto." });
+    }
+
+    console.log("Texto detectado:", message);
+    console.log("Telefone detectado:", phone);
+
+    // ---------------------------
+    // CONFIGURAR OPENAI (se existir)
+    // ---------------------------
+    const apiKey = process.env.OPENAI_API_KEY;
+    let resposta = "";
+
+    const systemPrompt = `
+Você é a ZENTRO AI, assistente virtual do Felipe Coronado.
+Atenda clientes de forma simpática, rápida, clara e profissional.
+Ajude em dúvidas sobre compras, produtos, marca, vídeos e projetos do Felipe.
+Não fale que é uma IA da OpenAI; diga apenas que é a assistente ZENTRO AI.
+    `;
+
+    if (apiKey) {
+      try {
+        const openaiResponse = await fetch(
+          "https://api.openai.com/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: "gpt-3.5-turbo",
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: message },
+              ],
+            }),
+          }
+        );
+
+        const data = await openaiResponse.json();
+        resposta =
+          data?.choices?.[0]?.message?.content?.trim() ||
+          "Oi! Aqui é a ZENTRO AI. Recebi sua mensagem, mas tive um probleminha para gerar a resposta. Pode tentar de novo em alguns segundos?";
+
+        console.log("Resposta gerada pela OpenAI:", resposta);
+      } catch (err) {
+        console.error("Erro ao chamar OpenAI:", err);
+        resposta =
+          "Oi! Aqui é a ZENTRO AI. Tive um erro interno ao processar sua mensagem, mas já já o Felipe vê isso pra você. 😊";
       }
+    } else {
+      // Caso não tenha OPENAI_API_KEY configurada
+      resposta =
+        "Oi! Aqui é a ZENTRO AI 👋\nAinda não estou conectada ao cérebro de IA (OPENAI_API_KEY ausente), mas já estou recebendo suas mensagens. Em breve o Felipe vai ativar tudo!";
+    }
 
-      // ---------------------------
-      // CONFIGURAR OPENAI
-      // ---------------------------
-      const apiKey = process.env.OPENAI_API_KEY;
-      if (!apiKey) {
-        return res.status(500).json({ error: "OPENAI_API_KEY faltando" });
-      }
+    // ---------------------------
+    // SE TIVER TELEFONE → RESPONDER PELO WHATSAPP (Z-API)
+    // ---------------------------
+    if (phone) {
+      const INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
+      const TOKEN = process.env.ZAPI_TOKEN;
 
-      const systemPrompt = `
-Você é a ZENTRO AI, uma assistente de vendas e atendimento do Felipe Coronado.
-Fale sempre de forma amigável, rápida e clara.
-Não mencione que é uma IA da OpenAI. Responda como se fosse do sistema ZENTRO.
-      `;
-
-      // ---------------------------
-      // GERAR RESPOSTA COM OPENAI
-      // ---------------------------
-      const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: "gpt-3.5-turbo",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: message }
-          ]
-        })
-      });
-
-      const data = await openaiResponse.json();
-      const resposta = data.choices?.[0]?.message?.content || "Desculpe, não entendi.";
-
-      // ---------------------------
-      // SE TIVER TELEFONE → RESPONDER PELO WHATSAPP
-      // ---------------------------
-      if (phone) {
-        const INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
-        const TOKEN = process.env.ZAPI_TOKEN;
-
+      if (!INSTANCE_ID || !TOKEN) {
+        console.error("ZAPI_INSTANCE_ID ou ZAPI_TOKEN não configurados.");
+      } else {
         const url = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`;
 
-        await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            phone: phone,
-            message: resposta
-          })
-        });
+        try {
+          const zapResponse = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              phone: phone,
+              message: resposta,
+            }),
+          });
 
-        return res.status(200).json({ status: "sent to WhatsApp" });
+          const zapData = await zapResponse.json();
+          console.log("Resposta da Z-API:", zapData);
+        } catch (err) {
+          console.error("Erro ao enviar mensagem pela Z-API:", err);
+        }
       }
 
-      // ---------------------------
-      // SE NÃO TIVER TELEFONE → RESPOSTA PARA O SITE
-      // ---------------------------
-      return res.status(200).json({
-        reply: resposta,
-        via: "site"
-      });
-
-    } catch (err) {
-      console.error("Erro no webhook:", err);
-      return res.status(500).json({ error: "Erro interno no Webhook" });
+      // Mesmo que dê erro no envio, respondemos 200 pro webhook
+      return res.status(200).json({ status: "ok", via: "whatsapp" });
     }
-  }
 
-  // ---------------------------
-  // MÉTODO ERRADO
-  // ---------------------------
-  return res.status(405).json({ error: "Método não permitido" });
+    // ---------------------------
+    // SE NÃO TIVER TELEFONE → RESPOSTA PARA SITE
+    // ---------------------------
+    return res.status(200).json({
+      reply: resposta,
+      via: "site",
+    });
+  } catch (err) {
+    console.error("Erro geral no handler:", err);
+    return res.status(500).json({ error: "Erro interno no Webhook da ZENTRO AI." });
+  }
 }
