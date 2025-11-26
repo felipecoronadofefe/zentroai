@@ -1,9 +1,11 @@
-export default async function handler(req, res) {
+// api/index.js — VERSÃO SIMPLIFICADA E DEBUGADA
 
+export default async function handler(req, res) {
+  // Teste no navegador
   if (req.method === "GET") {
     return res.status(200).json({
       status: "online",
-      message: "ZENTRO AI Webhook OK",
+      message: "ZENTRO AI Webhook OK (versão debug)",
     });
   }
 
@@ -13,28 +15,29 @@ export default async function handler(req, res) {
 
   try {
     const body = req.body || {};
-    console.log("Webhook recebido:", body);
+    console.log("==== WEBHOOK RECEBIDO ====");
+    console.log("BODY COMPLETO:", JSON.stringify(body, null, 2));
 
-    // ---------- PEGAR TEXTO EM QUALQUER FORMATO POSSÍVEL ----------
+    // ---------- PEGAR TEXTO EM TODOS OS LUGARES POSSÍVEIS ----------
     const message =
-      body?.text_?.message ||      
-      body?.text?.message ||
-      body?.message?.body ||
-      body?.message ||
-      body?.body ||
-      body?.lastMessage?.text ||
-      body?.lastMessage ||
+      (body && body.text_ && body.text_.message) ||
+      (body && body.text && body.text.message) ||
+      (body && body.message && body.message.body) ||
+      body.message ||
+      body.body ||
+      (body.lastMessage && body.lastMessage.text) ||
+      body.lastMessage ||
       "";
 
     // ---------- PEGAR TELEFONE ----------
-    let phone = body?.phone || null;
+    let phone = body.phone || null;
 
-    if (!phone && body?.chatId && body.chatId.includes("@")) {
+    if (!phone && typeof body.chatId === "string" && body.chatId.includes("@")) {
       phone = body.chatId.split("@")[0];
     }
 
-    console.log("Texto detectado:", message || "<vazio>");
-    console.log("Telefone detectado:", phone || "<nenhum>");
+    console.log(">>> TEXTO DETECTADO:", message || "<vazio>");
+    console.log(">>> TELEFONE DETECTADO:", phone || "<nenhum>");
 
     if (!message) {
       return res.status(200).json({ ok: true, info: "sem texto encontrado" });
@@ -42,36 +45,43 @@ export default async function handler(req, res) {
 
     const resposta = `Recebi sua mensagem: "${message}" 😊`;
 
-    // ---------- VARIÁVEIS ----------
+    // ---------- ENVIAR PELA Z-API ----------
     const INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
     const TOKEN = process.env.ZAPI_TOKEN;
-    const CLIENT_TOKEN = TOKEN;
+    const CLIENT_TOKEN = TOKEN; // na sua versão é o mesmo
+
+    if (!INSTANCE_ID || !TOKEN) {
+      console.error("Faltando INSTANCE_ID ou TOKEN da Z-API.");
+      return res.status(500).json({ error: "Configuração Z-API incompleta" });
+    }
+
+    if (!phone) {
+      console.error("Telefone não encontrado no webhook.");
+      return res.status(200).json({ ok: true, info: "sem telefone" });
+    }
 
     const url = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`;
-
-    console.log("Chamando Z-API:", url);
+    console.log(">>> ENVIANDO PARA Z-API:", url);
 
     const zapResponse = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Client-Token": CLIENT_TOKEN
+        "Client-Token": CLIENT_TOKEN,
       },
       body: JSON.stringify({
         phone,
-        message: resposta
+        message: resposta,
       }),
     });
 
     const responseText = await zapResponse.text();
-
-    console.log("Status Z-API:", zapResponse.status);
-    console.log("Resposta da Z-API:", responseText);
+    console.log(">>> STATUS Z-API:", zapResponse.status);
+    console.log(">>> RESPOSTA Z-API:", responseText);
 
     return res.status(200).json({ ok: true });
-
   } catch (err) {
-    console.error("Erro geral:", err);
+    console.error("ERRO GERAL NO WEBHOOK:", err);
     return res.status(500).json({ error: "Erro interno" });
   }
 }
