@@ -1,7 +1,5 @@
-// api/index.js — Webhook simples da ZENTRO AI com logs detalhados
-
 export default async function handler(req, res) {
-  // Teste rápido pelo navegador
+
   if (req.method === "GET") {
     return res.status(200).json({
       status: "online",
@@ -14,20 +12,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    console.log("Webhook recebido:", req.body);
     const body = req.body || {};
+    console.log("Webhook recebido:", body);
 
-    // ---------- TEXTO ----------
+    // ----- PEGAR TEXTO -----
     const message =
-      body?.text_?.message ||       // formato que vimos no log
+      body?.text_?.message ||   // <-- CAMPO QUE REALMENTE VEM PRA VOCÊ
       body?.message?.body ||
       body?.body ||
       "";
 
-    // ---------- TELEFONE ----------
+    // ----- PEGAR TELEFONE -----
     let phone = body?.phone || null;
 
-    if (!phone && typeof body?.chatId === "string" && body.chatId.includes("@")) {
+    if (!phone && body?.chatId && body.chatId.includes("@")) {
       phone = body.chatId.split("@")[0];
     }
 
@@ -35,48 +33,43 @@ export default async function handler(req, res) {
     console.log("Telefone detectado:", phone || "<nenhum>");
 
     if (!message) {
-      // só loga e sai, sem essa frase confusa
       return res.status(200).json({ ok: true, info: "sem texto" });
     }
 
-    // ---------- RESPOSTA SIMPLES ----------
-    const resposta = `Oi! Aqui é a ZENTRO AI 👋\nRecebi sua mensagem: "${message}"`;
+    const resposta = `Recebi sua mensagem: "${message}" 😊`;
 
-    // ---------- ENVIO PELA Z-API ----------
+    // ----- VARIÁVEIS -----
     const INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
     const TOKEN = process.env.ZAPI_TOKEN;
 
-    if (!INSTANCE_ID || !TOKEN) {
-      console.error("ZAPI_INSTANCE_ID ou ZAPI_TOKEN não configurados.");
-    } else if (!phone) {
-      console.error("Telefone não encontrado para envio.");
-    } else {
-      const url = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`;
-      console.log("Enviando para Z-API:", url, "phone:", phone);
+    // Client token = token da instância
+    const CLIENT_TOKEN = TOKEN;
 
-      try {
-        const zapResponse = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            phone,
-            message: resposta,
-          }),
-        });
+    const url = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`;
 
-        const text = await zapResponse.text();
-        console.log("Status HTTP da Z-API:", zapResponse.status);
-        console.log("Resposta da Z-API (texto bruto):", text);
-      } catch (err) {
-        console.error("Erro ao chamar Z-API:", err);
-      }
-    }
+    console.log("Chamando Z-API:", url);
+
+    const zapResponse = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Client-Token": CLIENT_TOKEN
+      },
+      body: JSON.stringify({
+        phone,
+        message: resposta
+      }),
+    });
+
+    const responseText = await zapResponse.text();
+
+    console.log("Status Z-API:", zapResponse.status);
+    console.log("Resposta da Z-API:", responseText);
 
     return res.status(200).json({ ok: true });
+
   } catch (err) {
-    console.error("Erro geral no webhook:", err);
-    return res.status(500).json({ error: "Erro interno no webhook" });
+    console.error("Erro geral:", err);
+    return res.status(500).json({ error: "Erro interno" });
   }
 }
