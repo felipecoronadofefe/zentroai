@@ -1,7 +1,7 @@
-// api/index.js — Webhook da ZENTRO AI integrado com Z-API
+// api/index.js — Webhook da ZENTRO AI (Z-API Multi-Device)
 
 export default async function handler(req, res) {
-  // ------------------ TESTE VIA NAVEGADOR ------------------
+  // ------------------ TESTE NO NAVEGADOR ------------------
   if (req.method === "GET") {
     return res.status(200).json({
       status: "online",
@@ -9,59 +9,34 @@ export default async function handler(req, res) {
     });
   }
 
+  // Aceita só POST para webhook
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Use método POST" });
   }
 
   try {
     console.log("Webhook recebido:", req.body);
+    const body = req.body || {};
 
-    // Transformar o body em string pra poder fazer busca se precisar
-    const rawBody =
-      typeof req.body === "string" ? req.body : JSON.stringify(req.body);
-
-    // ------------------ TENTAR ACHAR O TEXTO ------------------
+    // ------------------ PEGAR TEXTO ------------------
     let message =
-      req.body?.text_?.message || // formato que vimos no log
-      req.body?.message?.body ||
-      req.body?.body ||
-      req.body?.lastMessage ||
-      req.body?.content ||
+      body?.text_?.message ||   // formato que vimos nos logs: text_: { message: 'Oi' }
+      body?.message?.body ||
+      body?.body ||
+      body?.lastMessage ||
+      body?.content ||
       "";
 
-    // Se ainda não achou, tenta via regex na string
-    if (!message && rawBody) {
-      // 1) procura especificamente por "text_":{"message":"..."}
-      let match = rawBody.match(
-        /"text_"\s*:\s*{\s*"message"\s*:\s*"([^"]+)"/
-      );
-      // 2) se não achar, pega o primeiro "message":"..."
-      if (!match) {
-        match = rawBody.match(/"message"\s*:\s*"([^"]+)"/);
-      }
-      if (match) {
-        message = match[1];
-      }
-    }
-
-    // ------------------ TENTAR ACHAR O NÚMERO ------------------
+    // ------------------ PEGAR TELEFONE ------------------
     let phone =
-      req.body?.phone ||
-      req.body?.contactPhone ||
-      req.body?.message?.phone ||
+      body?.phone ||
+      body?.contactPhone ||
+      body?.message?.phone ||
       null;
 
-    // Se não achou, tenta extrair de chatId
-    if (!phone && req.body?.chatId && typeof req.body.chatId === "string") {
-      phone = req.body.chatId.split("@")[0];
-    }
-
-    // Última tentativa: regex na string
-    if (!phone && rawBody) {
-      const phoneMatch = rawBody.match(/"phone"\s*:\s*"([^"]+)"/);
-      if (phoneMatch) {
-        phone = phoneMatch[1];
-      }
+    // se não vier phone mas vier chatId tipo "5543...@s.whatsapp.net"
+    if (!phone && typeof body?.chatId === "string" && body.chatId.includes("@")) {
+      phone = body.chatId.split("@")[0];
     }
 
     console.log("Texto detectado:", message);
@@ -72,7 +47,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, info: "sem texto" });
     }
 
-    // ------------------ GERAR RESPOSTA COM IA ------------------
+    // ------------------ GERAR RESPOSTA COM A IA ------------------
     const apiKey = process.env.OPENAI_API_KEY;
     let resposta = "";
 
@@ -111,32 +86,33 @@ Nunca diga que é uma IA da OpenAI; diga apenas que é a ZENTRO AI.
         "Olá! Aqui é a ZENTRO AI 👋\nAinda não estou 100% ativada, mas já estou recebendo suas mensagens.";
     }
 
-    // ------------------ ENVIAR RESPOSTA PELO WHATSAPP ------------------
-    if (phone) {
-      const INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
-      const TOKEN = process.env.ZAPI_TOKEN;
+    // ------------------ ENVIAR RESPOSTA PELO WHATSAPP (Z-API) ------------------
+    const INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
+    const TOKEN = process.env.ZAPI_TOKEN;
 
-      if (INSTANCE_ID && TOKEN) {
-        const url = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`;
+    if (phone && INSTANCE_ID && TOKEN) {
+      const url = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`;
 
-        try {
-          const zapResponse = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              phone,
-              message: resposta,
-            }),
-          });
+      try {
+        const zapResponse = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            // na versão Multi-Device NÃO precisa de client-token no header
+          },
+          body: JSON.stringify({
+            phone,
+            message: resposta,
+          }),
+        });
 
-          const zapData = await zapResponse.json();
-          console.log("Resposta da Z-API:", zapData);
-        } catch (err) {
-          console.error("Erro ao enviar mensagem pela Z-API:", err);
-        }
-      } else {
-        console.error("INSTANCE_ID ou TOKEN não configurados.");
+        const zapData = await zapResponse.json();
+        console.log("Resposta da Z-API:", zapData);
+      } catch (err) {
+        console.error("Erro ao enviar mensagem pela Z-API:", err);
       }
+    } else {
+      console.error("Sem phone ou sem ZAPI_INSTANCE_ID/ZAPI_TOKEN configurados.");
     }
 
     return res.status(200).json({ ok: true });
