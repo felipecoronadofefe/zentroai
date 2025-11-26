@@ -15,14 +15,18 @@ export default async function handler(req, res) {
     const body = req.body || {};
     console.log("Webhook recebido:", body);
 
-    // ----- PEGAR TEXTO -----
+    // ---------- PEGAR TEXTO EM QUALQUER FORMATO POSSÍVEL ----------
     const message =
-      body?.text_?.message ||   // <-- CAMPO QUE REALMENTE VEM PRA VOCÊ
+      body?.text_?.message ||      
+      body?.text?.message ||
       body?.message?.body ||
+      body?.message ||
       body?.body ||
+      body?.lastMessage?.text ||
+      body?.lastMessage ||
       "";
 
-    // ----- PEGAR TELEFONE -----
+    // ---------- PEGAR TELEFONE ----------
     let phone = body?.phone || null;
 
     if (!phone && body?.chatId && body.chatId.includes("@")) {
@@ -33,16 +37,14 @@ export default async function handler(req, res) {
     console.log("Telefone detectado:", phone || "<nenhum>");
 
     if (!message) {
-      return res.status(200).json({ ok: true, info: "sem texto" });
+      return res.status(200).json({ ok: true, info: "sem texto encontrado" });
     }
 
     const resposta = `Recebi sua mensagem: "${message}" 😊`;
 
-    // ----- VARIÁVEIS -----
+    // ---------- VARIÁVEIS ----------
     const INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
     const TOKEN = process.env.ZAPI_TOKEN;
-
-    // Client token = token da instância
     const CLIENT_TOKEN = TOKEN;
 
     const url = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`;
